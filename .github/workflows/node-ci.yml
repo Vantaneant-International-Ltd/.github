@@ -1,0 +1,38 @@
+# Reusable Node CI for SvelteKit (and other Node) repos.
+#
+# Runs a shared install, check, lint, and build gate. Steps use --if-present, so
+# a repo without a given script is not failed for missing it.
+#
+# Call it from a Node repo with .github/workflows/ci.yml:
+#
+#   name: ci
+#   on: [push, pull_request]
+#   jobs:
+#     ci:
+#       uses: Vantaneant-International-Ltd/.github/.github/workflows/node-ci.yml@main
+
+name: node-ci (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: "20"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Check
+        run: npm run check --if-present
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Build
+        run: npm run build --if-present
