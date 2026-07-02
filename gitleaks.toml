@@ -1,0 +1,38 @@
+# VNTA Group org-wide gitleaks config.
+#
+# Consumed centrally by the reusable secret-scan workflow (secret-scan.yml),
+# which checks this repo out alongside the repo being scanned and passes it via
+# --config. Keeping the allowlist here (not per-repo) means "what counts as a
+# secret" is defined once for the whole org.
+#
+# useDefault keeps the FULL gitleaks default ruleset. The allowlist below is
+# deliberately narrow: it clears ONLY Supabase *publishable* keys, which are
+# public by design and RLS-guarded. It does NOT clear service_role keys,
+# sb_secret_ keys, or any other JWT — those still fail the scan. Red means real.
+
+title = "VNTA Group gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Supabase publishable/anon keys only — public by design, RLS-guarded. Nothing broader."
+
+# Don't scan this config file itself (it carries key *patterns*, not secrets).
+paths = [
+  '''\.vnta-org-ci/gitleaks\.toml''',
+]
+
+# New-format publishable key prefix (vnta, vendr). The secret counterpart is
+# sb_secret_, which this does NOT match and is therefore still caught.
+regexes = [
+  '''sb_publishable_[A-Za-z0-9_-]+''',
+]
+
+# Legacy anon (role:"anon") JWT for the eirvox project (ref arokrumaxjiidsqfpiii),
+# inlined into the built client bundle. Matched by its exact, unique signature
+# segment — a service_role JWT for the same project has a different signature and
+# is NOT allowlisted.
+stopwords = [
+  "EdTZS0XHo9t51vCgdp3BvFHyTuhVNzT-kN6Pi-4aDqc",
+]
