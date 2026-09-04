@@ -51,8 +51,11 @@ jobs:
             local name="$1" url="$2" expect="$3"
             shift 3
             local code
+            # curl prints 000 itself when it cannot connect; the fallback only
+            # covers curl not running at all.
             code="$(curl -sS -o /dev/null -w '%{http_code}' -L -A "$UA" \
-                      --max-time 20 --retry 2 --retry-delay 5 "$@" "$url" 2>/dev/null || echo 000)"
+                      --max-time 20 --retry 2 --retry-delay 5 "$@" "$url" 2>/dev/null || true)"
+            code="${code:-000}"
             if [[ "$code" =~ $expect ]]; then
               printf '| %s | %s | ok |\n' "$name" "$code" >> "$report"
             else
