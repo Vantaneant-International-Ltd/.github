@@ -1,0 +1,118 @@
+# Daily heartbeat for every live VNTA property.
+#
+# Fetches each live site and both Supabase projects once a day. If anything is
+# down it fails the run, writes a table to the run summary, and opens (or
+# comments on) an issue titled "Heartbeat: a live property is down" in this
+# repo, so a person is told without anyone having to look. When everything
+# answers again, the next run closes that issue.
+#
+# It doubles as a keep-alive: the free Supabase plan pauses a project after
+# about a week with no API traffic, which is what took the shared vendr/vnta
+# database offline in September 2026. One authenticated REST request a day is
+# enough to count as activity.
+#
+# Add a property: one more `probe` line. Remove one: delete its line.
+# Run it by hand: Actions -> heartbeat -> Run workflow.
+
+name: heartbeat
+
+on:
+  schedule:
+    - cron: "17 7 * * *" # 07:17 UTC, daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Publishable (anon) key for the vendr Supabase project, shared with vnta.
+      # Public by design: it ships in both sites' client bundles and is
+      # allowlisted in gitleaks.toml. Row-level security guards the data.
+      # Sending it makes the request count as project activity (see above).
+      VENDR_SUPABASE_ANON: sb_publishable_rpmSPCHja3L2Uy2_RrxjAA_Cz_NyHB2
+      UA: "vnta-heartbeat/1 (+https://github.com/Vantaneant-International-Ltd/.github)"
+    steps:
+      - name: Probe every live property
+        id: check
+        shell: bash
+        run: |
+          # -e is deliberately off: one failure must not stop the other probes.
+          set -uo pipefail
+          fail=0
+          report="$RUNNER_TEMP/report.md"
+          printf '| Property | HTTP | Result |\n|---|---|---|\n' > "$report"
+
+          # probe <name> <url> <expected-status-regex> [extra curl args...]
+          probe() {
+            local name="$1" url="$2" expect="$3"
+            shift 3
+            local code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -L -A "$UA" \
+                      --max-time 20 --retry 2 --retry-delay 5 "$@" "$url" 2>/dev/null || echo 000)"
+            if [[ "$code" =~ $expect ]]; then
+              printf '| %s | %s | ok |\n' "$name" "$code" >> "$report"
+            else
+              printf '| %s | %s | **DOWN** (expected %s) |\n' "$name" "$code" "$expect" >> "$report"
+              echo "::error::$name answered $code, expected $expect: $url"
+              fail=1
+            fi
+          }
+
+          # Live sites. Any 2xx after redirects is alive.
+          probe "vnta.xyz"          https://vnta.xyz          '^2..$'
+          probe "eirvox.ie"         https://eirvox.ie         '^2..$'
+          probe "vendr.ie"          https://vendr.ie          '^2..$'
+          probe "maisonseul.com"    https://maisonseul.com    '^2..$'
+          probe "tacet.social"      https://tacet.social      '^2..$'
+          probe "buildt.ie"         https://buildt.ie         '^2..$'
+          probe "ezgoautoworks.ie"  https://ezgoautoworks.ie  '^2..$'
+
+          # Supabase. A live project answers REST; a paused one answers 5xx or nothing.
+          # vendr (shared with vnta): sent with the public key, so it is a keep-alive too.
+          probe "supabase: vendr + vnta" \
+            "https://fmmvqlqdhytcxeucdfbj.supabase.co/rest/v1/" '^2..$' \
+            -H "apikey: $VENDR_SUPABASE_ANON" -H "Authorization: Bearer $VENDR_SUPABASE_ANON"
+          # eirvox: its key is not in this repo, so a healthy project answers 401
+          # (key required). Only a 5xx or no answer means down.
+          probe "supabase: eirvox" \
+            "https://arokrumaxjiidsqfpiii.supabase.co/rest/v1/" '^[24]..$'
+
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          exit "$fail"
+
+      - name: Open or update the heartbeat issue
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Heartbeat: a live property is down"
+          body="$(printf 'The daily heartbeat found at least one property down.\n\nRun: %s\n\n' "$RUN_URL"; cat "$RUNNER_TEMP/report.md")"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+                        --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+
+      - name: Close the heartbeat issue once everything answers
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="Heartbeat: a live property is down"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+                        --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --repo "$GITHUB_REPOSITORY" \
+              --comment "Every property answered on $(date -u +%F). Closing."
+          fi
