@@ -13,6 +13,12 @@
 #
 # Add a property: one more `probe` line. Remove one: delete its line.
 # Run it by hand: Actions -> heartbeat -> Run workflow.
+#
+# Also emails Renato a short, plain-language digest every single run, healthy
+# or not, via Resend (RESEND_API_KEY secret, vnta.xyz verified sender). This
+# replaced an earlier attempt to do the digest from a scheduled Claude
+# session; that session had no way to reach GitHub at all, so it silently did
+# nothing. Sending straight from the workflow has no such dependency.
 
 name: heartbeat
 
@@ -89,6 +95,7 @@ jobs:
             "https://arokrumaxjiidsqfpiii.supabase.co/rest/v1/" '^[24]..$'
 
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
           exit "$fail"
 
       - name: Open or update the heartbeat issue
@@ -123,3 +130,38 @@ jobs:
             gh issue close "$existing" --repo "$GITHUB_REPOSITORY" \
               --comment "Every property answered on $(date -u +%F). Closing."
           fi
+
+      - name: Email Renato a plain-language digest
+        if: always()
+        continue-on-error: true # a failed email must never fail the whole run
+        shell: bash
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FAIL: ${{ steps.check.outputs.fail }}
+        run: |
+          set -uo pipefail
+          if [ -z "${RESEND_API_KEY:-}" ]; then
+            echo "RESEND_API_KEY not set; skipping the digest email." >&2
+            exit 0
+          fi
+
+          report="$RUNNER_TEMP/report.md"
+          issues_url="https://github.com/${GITHUB_REPOSITORY}/issues?q=is%3Aissue+is%3Aopen+%22Heartbeat%3A+a+live+property+is+down%22+in%3Atitle"
+
+          if [ "${FAIL:-0}" = "1" ]; then
+            down="$(grep -F '**DOWN**' "$report" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' | paste -sd ', ' -)"
+            subject="VNTA daily check — ${down} needs a look"
+            text="Heads up: ${down} isn't answering right now. This was caught automatically a few minutes ago. I've opened a note with the details if you want to dig in: ${issues_url}. Everything else checked is fine."
+          else
+            subject="VNTA daily check — all good"
+            text="Good morning. Every VNTA site and both databases answered fine on today's check. Nothing needs your attention."
+          fi
+
+          payload="$(python3 -c 'import json, sys; print(json.dumps({"from": "VNTA Heartbeat <heartbeat@vnta.xyz>", "to": ["renato@vnta.xyz"], "subject": sys.argv[1], "text": sys.argv[2]}))' "$subject" "$text")"
+
+          curl -sS --max-time 20 -o /tmp/resend_response.json -w 'Resend responded %{http_code}\n' \
+            -X POST "https://api.resend.com/emails" \
+            -H "Authorization: Bearer $RESEND_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$payload"
+          cat /tmp/resend_response.json
