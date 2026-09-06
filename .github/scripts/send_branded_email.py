@@ -5,9 +5,12 @@ example report, a one-time notice, anything a person should read rather
 than a script.
 
 Reads everything from the environment so it can be driven from a
-workflow_dispatch input or from a shell one-liner:
+workflow_dispatch input or from a shell one-liner. TO, CC, and BCC each
+take a comma-separated address list; CC and BCC are omitted from the
+Resend payload entirely when empty, rather than sent as [].
 
-    TO=studio@vnta.xyz LABEL="example" HEADLINE="An example." \
+    TO=studio@vnta.xyz CC=someone@example.com BCC=studio@vnta.xyz \
+    LABEL="example" HEADLINE="An example." \
     BODY_HTML='<p style="margin:0;">Body copy here.</p>' \
     SUBJECT="VNTA: an example" FOOTER_NOTE="Sent by hand." \
     RESEND_API_KEY=... python3 .github/scripts/send_branded_email.py
@@ -31,9 +34,15 @@ from vnta_email import html_shell
 DEFAULT_FROM = "VNTA <studio@vnta.xyz>"
 
 
+def addr_list(env_var):
+    return [addr.strip() for addr in os.environ.get(env_var, "").split(",") if addr.strip()]
+
+
 def build_payload():
     from_addr = os.environ.get("FROM", DEFAULT_FROM)
-    to = [addr.strip() for addr in os.environ.get("TO", "studio@vnta.xyz").split(",") if addr.strip()]
+    to = addr_list("TO") or ["studio@vnta.xyz"]
+    cc = addr_list("CC")
+    bcc = addr_list("BCC")
     label = os.environ.get("LABEL", "notice")
     headline = os.environ.get("HEADLINE", "")
     body_html = os.environ.get("BODY_HTML", "")
@@ -41,13 +50,18 @@ def build_payload():
     subject = os.environ.get("SUBJECT", headline or "VNTA")
     footer_note = os.environ.get("FOOTER_NOTE", "Sent by VNTA Group.")
 
-    return {
+    payload = {
         "from": from_addr,
         "to": to,
         "subject": subject,
         "text": body_text,
         "html": html_shell(label, headline, body_html, footer_note),
     }
+    if cc:
+        payload["cc"] = cc
+    if bcc:
+        payload["bcc"] = bcc
+    return payload
 
 
 def send(payload):

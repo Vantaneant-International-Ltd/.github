@@ -17,6 +17,14 @@ on:
         description: Comma-separated recipient addresses
         type: string
         default: studio@vnta.xyz
+      cc:
+        description: Comma-separated CC addresses (optional)
+        type: string
+        default: ""
+      bcc:
+        description: Comma-separated BCC addresses (optional)
+        type: string
+        default: ""
       label:
         description: 'Small label under the top hairline, e.g. "monthly check example"'
         type: string
@@ -50,6 +58,8 @@ jobs:
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           TO: ${{ inputs.to }}
+          CC: ${{ inputs.cc }}
+          BCC: ${{ inputs.bcc }}
           LABEL: ${{ inputs.label }}
           HEADLINE: ${{ inputs.headline }}
           SUBJECT: ${{ inputs.subject }}
