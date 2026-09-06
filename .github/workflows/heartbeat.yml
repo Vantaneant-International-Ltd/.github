@@ -76,8 +76,12 @@ jobs:
 
           # Supabase. A live project answers REST; a paused one answers 5xx or nothing.
           # vendr (shared with vnta): sent with the public key, so it is a keep-alive too.
+          # The bare /rest/v1/ root can answer 401 even with a valid key (PostgREST
+          # wants a real table path to authorize against, not the root) — a real
+          # first-run false alarm on 2026-09-06 confirmed this. 401 still proves the
+          # project is awake and answering, which is all "not paused" needs.
           probe "supabase: vendr + vnta" \
-            "https://fmmvqlqdhytcxeucdfbj.supabase.co/rest/v1/" '^2..$' \
+            "https://fmmvqlqdhytcxeucdfbj.supabase.co/rest/v1/" '^[24]..$' \
             -H "apikey: $VENDR_SUPABASE_ANON" -H "Authorization: Bearer $VENDR_SUPABASE_ANON"
           # eirvox: its key is not in this repo, so a healthy project answers 401
           # (key required). Only a 5xx or no answer means down.
