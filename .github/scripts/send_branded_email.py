@@ -23,10 +23,16 @@ import sys
 
 from vnta_email import html_shell
 
-FROM = "VNTA <heartbeat@vnta.xyz>"
+# studio@vnta.xyz, not heartbeat@vnta.xyz: this script is for anything a
+# person outside the org might read, most often a client. "heartbeat" is
+# the org's own internal daily check, an odd thing for a client to see in
+# their inbox. studio@ is the address already used everywhere else VNTA
+# talks to the outside world (SECURITY.md, the contact form).
+DEFAULT_FROM = "VNTA <studio@vnta.xyz>"
 
 
 def build_payload():
+    from_addr = os.environ.get("FROM", DEFAULT_FROM)
     to = [addr.strip() for addr in os.environ.get("TO", "studio@vnta.xyz").split(",") if addr.strip()]
     label = os.environ.get("LABEL", "notice")
     headline = os.environ.get("HEADLINE", "")
@@ -36,7 +42,7 @@ def build_payload():
     footer_note = os.environ.get("FOOTER_NOTE", "Sent by VNTA Group.")
 
     return {
-        "from": FROM,
+        "from": from_addr,
         "to": to,
         "subject": subject,
         "text": body_text,
