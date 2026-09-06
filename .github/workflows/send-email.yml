@@ -1,0 +1,58 @@
+# Send a one-off email in VNTA's visual register via Resend. For anything
+# that isn't the daily heartbeat (which has its own scheduled workflow): an
+# example of what a future report will look like, a one-time notice, a test
+# send. Run it from Actions -> send-email -> Run workflow, or trigger it via
+# the API with the same inputs.
+#
+# Does not run on a schedule and reacts to nothing on its own; it only ever
+# does something when a person (or an agent acting on the owner's request)
+# explicitly asks it to, once, with the exact content given.
+
+name: send-email
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: Comma-separated recipient addresses
+        type: string
+        default: studio@vnta.xyz
+      label:
+        description: 'Small label under the top hairline, e.g. "monthly check example"'
+        type: string
+        required: true
+      headline:
+        description: The large Marcellus headline
+        type: string
+        required: true
+      subject:
+        description: Email subject line
+        type: string
+        required: true
+      body_html:
+        description: Body content as HTML (paragraphs etc.), rendered inside the VNTA envelope
+        type: string
+        required: true
+      footer_note:
+        description: Small mono footer line
+        type: string
+        default: Sent by VNTA Group.
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Send
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TO: ${{ inputs.to }}
+          LABEL: ${{ inputs.label }}
+          HEADLINE: ${{ inputs.headline }}
+          SUBJECT: ${{ inputs.subject }}
+          BODY_HTML: ${{ inputs.body_html }}
+          FOOTER_NOTE: ${{ inputs.footer_note }}
+        run: python3 .github/scripts/send_branded_email.py
