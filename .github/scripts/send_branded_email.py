@@ -18,9 +18,8 @@ workflow step fails loudly rather than reporting green on a silent drop.
 
 import json
 import os
+import subprocess
 import sys
-import urllib.error
-import urllib.request
 
 from vnta_email import html_shell
 
@@ -46,27 +45,35 @@ def build_payload():
 
 
 def send(payload):
+    # Shells out to curl rather than urllib: Resend sits behind Cloudflare,
+    # and urllib's default User-Agent ("Python-urllib/3.x") reads as a bot
+    # signature to it, a real 403 hit on 2026-09-06 (Cloudflare error 1010).
+    # curl's default User-Agent does not trip it; heartbeat_email.py's own
+    # curl-based send already proved that twice before this script existed.
     api_key = os.environ.get("RESEND_API_KEY", "")
     if not api_key:
         print("RESEND_API_KEY not set.", file=sys.stderr)
         sys.exit(1)
 
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+    result = subprocess.run(
+        [
+            "curl", "-sS", "--max-time", "20",
+            "-w", "\nHTTP_STATUS:%{http_code}",
+            "-X", "POST", "https://api.resend.com/emails",
+            "-H", f"Authorization: Bearer {api_key}",
+            "-H", "Content-Type: application/json",
+            "-d", json.dumps(payload),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as res:
-            print(f"Resend responded {res.status}")
-            print(res.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        print(f"Resend responded {e.code}", file=sys.stderr)
-        print(e.read().decode("utf-8"), file=sys.stderr)
+    body, _, status = result.stdout.rpartition("HTTP_STATUS:")
+    status = status.strip()
+    print(f"Resend responded {status or '?'}")
+    print(body.strip())
+    if result.returncode != 0 or not status.startswith("2"):
+        print(result.stderr, file=sys.stderr)
         sys.exit(1)
 
 
