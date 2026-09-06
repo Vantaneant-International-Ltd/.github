@@ -1,0 +1,12 @@
+# Keep the actions this repo's reusable workflows pin up to date. Monthly and
+# grouped, so it arrives as one small PR rather than a stream. Every consumer
+# calls these workflows @main, so a merged bump here reaches every repo's CI.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

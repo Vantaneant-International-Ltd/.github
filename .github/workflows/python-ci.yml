@@ -1,0 +1,42 @@
+# Reusable Python CI for uv-managed repos (vnta-mcp and any that follow it).
+#
+# Installs the locked environment and runs pytest. `--locked` fails the run if
+# uv.lock has drifted from pyproject.toml, which is the "committed lockfile"
+# rule from org-standards made mechanical: fix it with `uv lock` and commit.
+#
+# Python comes from the repo's own .python-version (uv installs it). Pass
+# `python-version` to override.
+#
+# Call it from a Python repo with .github/workflows/ci.yml:
+#
+#   name: ci
+#   on: [push, pull_request]
+#   jobs:
+#     ci:
+#       uses: Vantaneant-International-Ltd/.github/.github/workflows/python-ci.yml@main
+
+name: python-ci (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Override the repo's .python-version
+        type: string
+        default: ""
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ inputs.python-version }}
+      - name: Install (locked)
+        run: uv sync --all-groups --locked
+      - name: Test
+        run: uv run pytest
