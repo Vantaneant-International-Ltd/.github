@@ -1,0 +1,84 @@
+# Weekly "how is your site doing" email to BUILDT's Andrew, sent from VNTA
+# (studio@vnta.xyz). Promised in his welcome email ("weekly updates about
+# his site"). Checks buildt.ie live right before sending, so the status
+# line is a fact checked moments ago rather than a guess, then sends via
+# .github/scripts/buildt_weekly_email.py in VNTA's own visual register
+# (the same envelope the daily heartbeat digest uses).
+#
+# Runs Wednesdays, deliberately not the day this workflow was created
+# (a Monday), so there is always a few days of runway to review or tweak
+# the copy before it ever reaches Andrew for real.
+#
+# Two cron times, same reasoning as heartbeat.yml: GitHub's own scheduler
+# is best-effort and can silently skip a tick on a quiet repo. The 10:00
+# tick checks whether a scheduled run already succeeded today and stands
+# down if so, so a normal week still gets exactly one email; only a
+# genuinely missed 09:00 causes 10:00 to actually send.
+#
+# Run it by hand to test: Actions -> buildt-weekly-update -> Run workflow.
+# A manual run can point to/cc/bcc at reviewers instead of the real client
+# via the inputs below; the schedule itself always uses the real
+# production recipients hardcoded in the script.
+
+name: buildt-weekly-update
+
+on:
+  schedule:
+    - cron: "0 9 * * 3"  # Wednesday 09:00 UTC
+    - cron: "0 10 * * 3" # Wednesday 10:00 UTC, backup in case 09:00 was silently skipped
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "Override recipient, e.g. for a review send (leave blank for the real client address)"
+        type: string
+        default: ""
+      cc:
+        description: "Override cc (leave blank for the real default)"
+        type: string
+        default: ""
+      bcc:
+        description: "Override bcc (leave blank for the real default)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read # lets the 10:00 backup tick check today's run history via `gh run list`
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      # Only meaningful for the 10:00 backup tick, same guard as
+      # heartbeat.yml: stands down if a scheduled run already succeeded
+      # today. Skipped entirely for a manual run, which always runs in full.
+      - name: Skip if a scheduled run already succeeded today
+        id: guard
+        if: github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          today="$(date -u +%F)"
+          already="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow buildt-weekly-update.yml \
+                       --limit 20 --json databaseId,event,conclusion,createdAt \
+                       --jq "[.[] | select(.event==\"schedule\" and .conclusion==\"success\" and (.createdAt | startswith(\"$today\")) and .databaseId != $GITHUB_RUN_ID)] | length")"
+          if [ "${already:-0}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "A scheduled run already succeeded today; this is the backup tick, standing down."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.guard.outputs.skip != 'true'
+
+      - name: Send
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TO: ${{ inputs.to }}
+          CC: ${{ inputs.cc }}
+          BCC: ${{ inputs.bcc }}
+        run: python3 .github/scripts/buildt_weekly_email.py
