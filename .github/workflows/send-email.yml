@@ -53,7 +53,7 @@ jobs:
   send:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Send
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

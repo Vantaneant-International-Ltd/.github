@@ -90,7 +90,7 @@ jobs:
       # ran with no checkout at all until 2026-09-06, when adding that step
       # without adding a checkout broke it (the email step failed with the
       # working directory holding no repo content whatsoever).
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: steps.guard.outputs.skip != 'true'
 
       - name: Probe every live property
