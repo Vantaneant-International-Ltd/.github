@@ -28,17 +28,28 @@
 # session; that session had no way to reach GitHub at all in this
 # environment, so it silently did nothing. Sending straight from the
 # workflow has no such dependency.
+#
+# Two cron times, not one: GitHub's own scheduler is best-effort and can
+# silently skip a tick on a quiet repo, no error, no log, nothing to alert
+# on (confirmed for real on 2026-09-07, when the 07:17 run just never
+# happened). 08:17 is the backup. Its first step checks whether a scheduled
+# run already succeeded today; if so, it stands down before doing anything
+# else, so a normal day still gets exactly one email, and only a missed
+# 07:17 causes 08:17 to actually run. Manual runs (Run workflow) always run
+# in full and never skip.
 
 name: heartbeat
 
 on:
   schedule:
     - cron: "17 7 * * *" # 07:17 UTC, daily
+    - cron: "17 8 * * *" # 08:17 UTC, backup in case 07:17 was silently skipped
   workflow_dispatch:
 
 permissions:
   contents: read
   issues: write
+  actions: read # lets the 08:17 backup tick check today's run history via `gh run list`
 
 jobs:
   check:
@@ -51,15 +62,40 @@ jobs:
       VENDR_SUPABASE_ANON: sb_publishable_rpmSPCHja3L2Uy2_RrxjAA_Cz_NyHB2
       UA: "vnta-heartbeat/1 (+https://github.com/Vantaneant-International-Ltd/.github)"
     steps:
+      # Only meaningful for the 08:17 backup tick: stands down if a
+      # scheduled run already succeeded today, so a normal day still gets
+      # exactly one email. Skipped entirely for a manual (Run workflow) run,
+      # which always runs in full regardless of what already happened today.
+      - name: Skip if a scheduled run already succeeded today
+        id: guard
+        if: github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          today="$(date -u +%F)"
+          already="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow heartbeat.yml \
+                       --limit 20 --json databaseId,event,conclusion,createdAt \
+                       --jq "[.[] | select(.event==\"schedule\" and .conclusion==\"success\" and (.createdAt | startswith(\"$today\")) and .databaseId != $GITHUB_RUN_ID)] | length")"
+          if [ "${already:-0}" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "A scheduled run already succeeded today; this is the backup tick, standing down."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Needed only so the email step below can read heartbeat_email.py from
       # the repo; nothing else in this job touches repo files. This workflow
       # ran with no checkout at all until 2026-09-06, when adding that step
       # without adding a checkout broke it (the email step failed with the
       # working directory holding no repo content whatsoever).
       - uses: actions/checkout@v5
+        if: steps.guard.outputs.skip != 'true'
 
       - name: Probe every live property
         id: check
+        if: steps.guard.outputs.skip != 'true'
         shell: bash
         run: |
           # -e is deliberately off: one failure must not stop the other probes.
@@ -115,7 +151,7 @@ jobs:
           exit "$fail"
 
       - name: Open or update the heartbeat issue
-        if: failure()
+        if: failure() && steps.guard.outputs.skip != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -133,7 +169,7 @@ jobs:
           fi
 
       - name: Close the heartbeat issue once everything answers
-        if: success()
+        if: success() && steps.guard.outputs.skip != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,7 +184,7 @@ jobs:
           fi
 
       - name: Email studio@vnta.xyz a branded digest
-        if: always()
+        if: always() && steps.guard.outputs.skip != 'true'
         continue-on-error: true # a failed email must never fail the whole run
         shell: bash
         env:
